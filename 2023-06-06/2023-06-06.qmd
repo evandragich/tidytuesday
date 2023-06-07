@@ -1,0 +1,145 @@
+---
+title: "TidyTuesday 06/06/2023 - Energy Data"
+format: html
+execute:
+  echo: false
+  warning: false
+  message: false
+  cache: true
+---
+
+```{r}
+#| label: load-packages-data
+library(tidyverse)
+library(countrycode)
+library(gganimate)
+library(patchwork)
+library(magick)
+
+# tidytuesday data
+owid_energy <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2023/2023-06-06/owid-energy.csv')
+
+
+```
+# Task 1a - Monitor Country excess energy produciton over time with racing bar chart
+
+```{r}
+#| label: clean-for-def-surplus
+data1 <- owid_energy |>
+  select(iso_code, year, electricity_demand, electricity_generation) |>
+  drop_na() |>
+  filter(year >= 2000, year <= 2021, electricity_demand > 0, electricity_generation > 0) |>
+  mutate(dem_over_gen = electricity_demand / electricity_generation,
+         gen_over_dem = 1 / dem_over_gen) |>
+  group_by(year) |>
+  mutate(surplus_rank = rank(dem_over_gen, ties.method = "first"),
+         deficit_rank = rank(gen_over_dem, ties.method = "first"),
+         continent = countrycode(iso_code, origin = "iso3c", destination = "continent"),
+         country = countrycode(iso_code, origin = "iso3c", destination = "country.name")) |>
+  select(iso_code, country, continent, year, dem_over_gen, deficit_rank, gen_over_dem, surplus_rank) |>
+  filter(deficit_rank <= 7 | surplus_rank <= 7) |>
+  arrange(year, deficit_rank) |>
+  rowwise() |>
+  mutate(sur_or_def = if_else(deficit_rank <= 7, "deficit", "surplus"),
+         true_value = max(dem_over_gen, gen_over_dem),
+         true_rank = min(deficit_rank, surplus_rank))
+```
+
+```{r}
+#| label: make-sur-plot
+surplus_facet_plot <- data1 |>
+  filter(sur_or_def == "surplus") |>
+  ggplot(aes(xmin = 0, xmax = true_value, ymin = 8 - true_rank - 0.45, ymax = 8 - true_rank + 0.45, y = 8 - true_rank)) +
+  geom_rect(aes(fill = continent), alpha = 0.7) +
+  geom_text(aes(x = -0.5, label = country), hjust = "right") +
+  scale_fill_viridis_d(option = "H") +
+  scale_x_continuous(limits = c(-10, 10)) + 
+  labs(title = "Largest Overproducers of Energy",
+       x = "Ratio of Energy Surplus to Energy Demand",
+       y = "Yearly Rank",
+       fill = "Continent") +
+  facet_wrap(facets = vars(year)) +
+  theme_minimal() +
+  theme(legend.direction = "horizontal",
+        legend.position = "top") +
+  scale_x_continuous(limits = c(-7.5, 10)) +
+  facet_null() +
+  geom_text(x = 7 , y = 2, family = "Times", aes(label = as.character(year)), size = 20, col = "grey18") +
+  transition_states(
+    states = year,
+    transition_length = 2,
+    state_length = 1
+  )
+
+anim_sur <- animate(surplus_facet_plot)
+```
+
+
+```{r}
+#| label: make-def-plot
+deficit_facet_plot <- data1 |>
+  filter(sur_or_def == "deficit") |>
+  ggplot(aes(xmin = 0, xmax = true_value, ymin = 8 - true_rank - 0.45, ymax = 8 - true_rank + 0.45, y = 8 - true_rank)) +
+  geom_rect(aes(fill = continent), alpha = 0.7) +
+  geom_text(aes(x = -0.5, label = country), hjust = "right") +
+  scale_fill_viridis_d(option = "H") +
+  scale_x_continuous(limits = c(-10, 76)) + 
+  labs(title = "Largest Underproducers of Energy",
+       x = "Ratio of Energy Demand to Energy Surplus",
+       y = "Yearly Rank",
+       fill = "Continent") +
+  facet_wrap(facets = vars(year)) +
+  theme_minimal() +
+  theme(legend.direction = "horizontal",
+        legend.position = "top") +
+  scale_x_continuous(limits = c(-25, 76)) +
+  facet_null() +
+  geom_text(x = 55 , y = 2, family = "Times", aes(label = as.character(year)), size = 20, col = "grey18") +
+  transition_states(
+    states = year,
+    transition_length = 2,
+    state_length = 1
+  )
+
+anim_def <- animate(deficit_facet_plot)
+```
+
+
+```{r}
+#| label: combine-gifs
+sur_mgif <- image_read(anim_sur)
+def_mgif <- image_read(anim_def)
+
+new_gif <- image_append(c(sur_mgif[1], def_mgif[1]))
+for(i in 2:57){
+  combined <- image_append(c(sur_mgif[i], def_mgif[i]))
+  new_gif <- c(new_gif, combined)
+}
+```
+
+```{r} 
+#| label: display-final-gif
+new_gif
+```
+
+
+
+
+# Task 1b - Monitor Country GDP over time with racing bar chart
+
+```{r}
+data1 <- owid_energy |>
+  select(iso_code, year, gdp, population, electricity_demand, electricity_generation) %>%
+  drop_na()
+```
+
+
+
+
+# Task 2 - Examine relationships between % change GDP YoY with % change in usage of each type of electricity
+```{r}
+data2 <- owid_energy |>
+  filter(!is.na(iso_code) & !is.na(gdp) & !is.na(population)) |>
+  select(contains("per_capita") | contains("energy_share") | contains("change_pct") | contains(match = c("iso_code", "gdp", "population")))
+```
+
